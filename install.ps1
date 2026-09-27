@@ -1,4 +1,4 @@
-```powershell
+powershell
 # =====================================================================
 # Windows Power Toggle v1.0.0.0 - Self-Building Package
 # Copy and paste this entire block into PowerShell and press Enter.
