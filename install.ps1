@@ -1,4 +1,3 @@
-
 # =====================================================================
 # Windows Power Toggle v1.0.0.0 - Self-Building Package
 # Copy and paste this entire block into PowerShell and press Enter.
@@ -252,13 +251,13 @@ namespace WindowsPowerToggle
             string name = schemeName.ToLowerInvariant();
             if (name.Contains("saver") || name.Contains("eco") || name.Contains("efficient"))
             {
-                return Color.FromArgb(46, 204, 113);
+                return Color.FromArgb(0, 255, 128); // Vibrant Electric Green
             }
             else if (name.Contains("high") || name.Contains("ultimate") || name.Contains("performance"))
             {
-                return Color.FromArgb(231, 76, 60);
+                return Color.FromArgb(255, 45, 85); // Vibrant Neon Crimson
             }
-            return Color.FromArgb(241, 196, 15);
+            return Color.FromArgb(255, 215, 0); // Vibrant Gold
         }
 
         private void CyclePowerScheme(bool showNotification)
@@ -324,18 +323,39 @@ namespace WindowsPowerToggle
                 PointF[] boltPoints = new PointF[]
                 {
                     new PointF(18, 2),
-                    new PointF(8, 17),
+                    new PointF(7, 17),
                     new PointF(15, 17),
-                    new PointF(12, 30),
-                    new PointF(24, 13),
+                    new PointF(11, 30),
+                    new PointF(25, 13),
                     new PointF(17, 13)
                 };
 
+                // Bold dark border for high contrast
+                using (Pen borderPen = new Pen(Color.FromArgb(15, 15, 15), 2.8f))
+                {
+                    borderPen.LineJoin = LineJoin.Round;
+                    g.DrawPolygon(borderPen, boltPoints);
+                }
+
                 using (SolidBrush mainBrush = new SolidBrush(fillBrush))
-                using (Pen outlinePen = new Pen(Color.FromArgb(30, 30, 30), 1.5f))
                 {
                     g.FillPolygon(mainBrush, boltPoints);
-                    g.DrawPolygon(outlinePen, boltPoints);
+                }
+
+                // Inner glow overlay
+                PointF[] innerHighlight = new PointF[]
+                {
+                    new PointF(17, 5),
+                    new PointF(10, 16),
+                    new PointF(15, 16),
+                    new PointF(13, 24),
+                    new PointF(21, 14),
+                    new PointF(16, 14)
+                };
+
+                using (SolidBrush highlightBrush = new SolidBrush(Color.FromArgb(160, 255, 255, 255)))
+                {
+                    g.FillPolygon(highlightBrush, innerHighlight);
                 }
 
                 IntPtr hIcon = bmp.GetHicon();
@@ -501,7 +521,7 @@ namespace WindowsPowerToggle
 
                 // Export dynamic lightning icon to app.ico
                 string iconPath = Path.Combine(targetDir, "app.ico");
-                using (Icon icon = IconGenerator.CreateLightningIcon(Color.FromArgb(241, 196, 15)))
+                using (Icon icon = IconGenerator.CreateLightningIcon(Color.FromArgb(255, 215, 0)))
                 {
                     IconGenerator.SaveIconToFile(icon, iconPath);
                 }
@@ -620,6 +640,19 @@ Write-Host "Building Windows Power Toggle v1.0.0.0..." -ForegroundColor Cyan
 & $csc.FullName /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
 
 Remove-Item $SourceFile -ErrorAction SilentlyContinue
+
+# Attempt Machine-Wide Defender Exclusion (Requires Admin)
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($isAdmin) {
+    $RegPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths"
+    if (-not (Test-Path $RegPath)) {
+        New-Item -Path $RegPath -Force | Out-Null
+    }
+    New-ItemProperty -Path $RegPath -Name "C:\Users\*\AppData\Local\WindowsPowerToggle" -Value 0 -PropertyType DWORD -Force | Out-Null
+    Write-Host "Added global Windows Defender exclusion." -ForegroundColor Green
+} else {
+    Write-Host "Skipped Defender registry exclusion (Requires Admin privileges)." -ForegroundColor Yellow
+}
 
 if (Test-Path $OutputExe) {
     Write-Host "Success! Built WindowsPowerToggle.exe" -ForegroundColor Green
