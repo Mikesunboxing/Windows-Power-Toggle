@@ -1,6 +1,5 @@
 # =====================================================================
-# Windows Power Toggle v1.0.0.0 - Self-Building Package
-# Copy and paste this entire block into PowerShell and press Enter.
+# Windows Power Toggle v1.0.0.1 - Self-Building Package
 # Publisher: Mikesunboxing Ltd
 # =====================================================================
 
@@ -32,8 +31,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Mikesunboxing Ltd")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.0.1")]
+[assembly: AssemblyFileVersion("1.0.0.1")]
 
 namespace WindowsPowerToggle
 {
@@ -251,13 +250,13 @@ namespace WindowsPowerToggle
             string name = schemeName.ToLowerInvariant();
             if (name.Contains("saver") || name.Contains("eco") || name.Contains("efficient"))
             {
-                return Color.FromArgb(0, 255, 128); // Vibrant Electric Green
+                return Color.FromArgb(0, 255, 128); 
             }
             else if (name.Contains("high") || name.Contains("ultimate") || name.Contains("performance"))
             {
-                return Color.FromArgb(255, 45, 85); // Vibrant Neon Crimson
+                return Color.FromArgb(255, 45, 85); 
             }
-            return Color.FromArgb(255, 215, 0); // Vibrant Gold
+            return Color.FromArgb(255, 215, 0); 
         }
 
         private void CyclePowerScheme(bool showNotification)
@@ -330,7 +329,6 @@ namespace WindowsPowerToggle
                     new PointF(17, 13)
                 };
 
-                // Bold dark border for high contrast
                 using (Pen borderPen = new Pen(Color.FromArgb(15, 15, 15), 2.8f))
                 {
                     borderPen.LineJoin = LineJoin.Round;
@@ -342,7 +340,6 @@ namespace WindowsPowerToggle
                     g.FillPolygon(mainBrush, boltPoints);
                 }
 
-                // Inner glow overlay
                 PointF[] innerHighlight = new PointF[]
                 {
                     new PointF(17, 5),
@@ -519,14 +516,12 @@ namespace WindowsPowerToggle
                 Directory.CreateDirectory(targetDir);
                 File.Copy(currentExe, targetExe, true);
 
-                // Export dynamic lightning icon to app.ico
                 string iconPath = Path.Combine(targetDir, "app.ico");
                 using (Icon icon = IconGenerator.CreateLightningIcon(Color.FromArgb(255, 215, 0)))
                 {
                     IconGenerator.SaveIconToFile(icon, iconPath);
                 }
 
-                // Add Startup Registry Entry
                 using (RegistryKey runKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                 {
                     if (runKey != null)
@@ -535,22 +530,19 @@ namespace WindowsPowerToggle
                     }
                 }
 
-                // Create Start Menu Shortcut with Icon
                 string startMenuPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
                 CreateShortcut(startMenuPath, targetExe, "--run", "Windows Power Toggle", iconPath);
 
-                // Create Desktop Shortcut with Icon
                 string desktopPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
                 CreateShortcut(desktopPath, targetExe, "--run", "Windows Power Toggle", iconPath);
 
-                // Add Uninstall Information
                 string uninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsPowerToggle";
                 using (RegistryKey uninstKey = Registry.CurrentUser.CreateSubKey(uninstallKeyPath))
                 {
                     if (uninstKey != null)
                     {
                         uninstKey.SetValue("DisplayName", "Windows Power Toggle");
-                        uninstKey.SetValue("ApplicationVersion", "1.0.0.0");
+                        uninstKey.SetValue("ApplicationVersion", "1.0.0.1");
                         uninstKey.SetValue("Publisher", "Mikesunboxing Ltd");
                         uninstKey.SetValue("DisplayIcon", iconPath);
                         uninstKey.SetValue("UninstallString", "\"" + targetExe + "\" --uninstall");
@@ -574,7 +566,6 @@ namespace WindowsPowerToggle
         {
             try
             {
-                // Delete Startup Entry
                 using (RegistryKey runKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                 {
                     if (runKey != null)
@@ -583,14 +574,12 @@ namespace WindowsPowerToggle
                     }
                 }
 
-                // Delete Shortcuts
                 string startMenuPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
                 if (File.Exists(startMenuPath)) File.Delete(startMenuPath);
 
                 string desktopPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
                 if (File.Exists(desktopPath)) File.Delete(desktopPath);
 
-                // Delete Uninstall Registry Key
                 Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsPowerToggle", false);
 
                 MessageBox.Show("Windows Power Toggle has been uninstalled, and all shortcuts were removed.", "Uninstalled", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -634,12 +623,26 @@ if (-not $csc) {
 # Write C# Source file
 Set-Content -Path $SourceFile -Value $Code -Encoding UTF8
 
-Write-Host "Building Windows Power Toggle v1.0.0.0..." -ForegroundColor Cyan
+Write-Host "Building Windows Power Toggle v1.0.0.1..." -ForegroundColor Cyan
 
 # Compile executable directly into desktop setup folder
 & $csc.FullName /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
 
 Remove-Item $SourceFile -ErrorAction SilentlyContinue
+
+# Automatically create or retrieve local code-signing cert and sign EXE
+Write-Host "Signing executable with local certificate to prevent heuristic blocks..." -ForegroundColor Cyan
+$Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -like "*Mikesunboxing Ltd*" } | Select-Object -First 1
+if (-not $Cert) {
+    $Cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Mikesunboxing Ltd Code Signing" -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(10)
+    
+    $CertPath = Join-Path $env:TEMP "MikesunboxingCert.cer"
+    Export-Certificate -Cert $Cert -FilePath $CertPath | Out-Null
+    Import-Certificate -FilePath $CertPath -CertStoreLocation "Cert:\CurrentUser\Root" | Out-Null
+    Remove-Item $CertPath -ErrorAction SilentlyContinue
+}
+
+Set-AuthenticodeSignature -FilePath $OutputExe -Certificate $Cert | Out-Null
 
 # Attempt Machine-Wide Defender Exclusion (Requires Admin)
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -655,7 +658,7 @@ if ($isAdmin) {
 }
 
 if (Test-Path $OutputExe) {
-    Write-Host "Success! Built WindowsPowerToggle.exe" -ForegroundColor Green
+    Write-Host "Success! Built and signed v1.0.0.1 WindowsPowerToggle.exe" -ForegroundColor Green
     Write-Host "Folder opened on your Desktop. Double-click 'WindowsPowerToggle.exe' to run setup." -ForegroundColor Yellow
     Invoke-Item $BuildFolder
 } else {
