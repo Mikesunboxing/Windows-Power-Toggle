@@ -29,7 +29,6 @@ You don't need to download compiled binaries or use external tools. You can buil
 ### Step-by-Step Guide
 
 1. Press `Win + X` and select **PowerShell** (or Windows Terminal).
-   > **Note on Administrative Privileges:** You **do NOT need to run PowerShell as Administrator**. The app installs entirely to user-level directories (`%LOCALAPPDATA%` and `HKCU`). However, if you *do* choose to run PowerShell as Administrator, the setup script will automatically attempt to register a machine-wide Windows Defender exclusion as an added benefit.
 2. Copy the full setup script block and paste it directly into your PowerShell window, then press **Enter**.
 3. The script compiles `WindowsPowerToggle.exe` into a setup folder on your Desktop (`Windows Power Toggle Setup`) and opens the folder automatically.
 4. **Double-click `WindowsPowerToggle.exe`** inside the desktop setup folder to launch the interactive setup prompt.
