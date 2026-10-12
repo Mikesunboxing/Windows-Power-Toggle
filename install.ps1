@@ -1,5 +1,5 @@
 # =====================================================================
-# Windows Power Toggle v1.0.0.2 - Self-Building Package
+# Windows Power Toggle v1.0.0.3 - Self-Building Package
 # Publisher: Mikesunboxing Ltd
 # =====================================================================
 
@@ -31,8 +31,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Mikesunboxing Ltd")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.0.2")]
-[assembly: AssemblyFileVersion("1.0.0.2")]
+[assembly: AssemblyVersion("1.0.0.3")]
+[assembly: AssemblyFileVersion("1.0.0.3")]
 
 namespace WindowsPowerToggle
 {
@@ -51,8 +51,7 @@ namespace WindowsPowerToggle
             string targetExe = Path.Combine(targetDir, "WindowsPowerToggle.exe");
             string currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
 
-            // Zero-Argument Logic: If running from target install directory, execute app silently.
-            // If running from anywhere else, prompt user for installation.
+            // Zero-Argument Logic: Execute app directly if in target folder, otherwise prompt setup
             if (currentExe.Equals(targetExe, StringComparison.OrdinalIgnoreCase))
             {
                 RunSingleInstanceApp();
@@ -128,6 +127,7 @@ namespace WindowsPowerToggle
             InitializeTray();
             RegisterHotkey();
             RefreshPowerSchemes();
+            PromoteTrayIconInRegistry();
         }
 
         private void InitializeTray()
@@ -142,6 +142,45 @@ namespace WindowsPowerToggle
             };
 
             trayIcon.MouseClick += TrayIcon_MouseClick;
+        }
+
+        /// <summary>
+        /// Automatically forces Windows 11 to display the tray icon permanently (IsPromoted = 1)
+        /// </summary>
+        private void PromoteTrayIconInRegistry()
+        {
+            try
+            {
+                string currentExePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                using (RegistryKey notifyKey = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings"))
+                {
+                    if (notifyKey == null) return;
+
+                    foreach (string subkeyName in notifyKey.GetSubKeyNames())
+                    {
+                        using (RegistryKey appKey = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings\" + subkeyName, true))
+                        {
+                            if (appKey != null)
+                            {
+                                object execPathObj = appKey.GetValue("ExecutablePath");
+                                if (execPathObj != null)
+                                {
+                                    string execPath = execPathObj.ToString();
+                                    if (execPath.Equals(currentExePath, StringComparison.OrdinalIgnoreCase) ||
+                                        execPath.IndexOf("WindowsPowerToggle.exe", StringComparison.OrdinalIgnoreCase) >= 0)
+                                    {
+                                        appKey.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Non-critical operation: ignore registry access exceptions if key doesn't exist yet
+            }
         }
 
         private void RegisterHotkey()
@@ -528,7 +567,7 @@ namespace WindowsPowerToggle
                     if (uninstKey != null)
                     {
                         uninstKey.SetValue("DisplayName", "Windows Power Toggle");
-                        uninstKey.SetValue("ApplicationVersion", "1.0.0.2");
+                        uninstKey.SetValue("ApplicationVersion", "1.0.0.3");
                         uninstKey.SetValue("Publisher", "Mikesunboxing Ltd");
                         uninstKey.SetValue("DisplayIcon", iconPath);
                         uninstKey.SetValue("UninstallString", "powershell -Command \"Remove-Item -Recurse -Force '" + targetDir + "'; Remove-Item -Force '" + startupShortcutPath + "'\"");
@@ -538,7 +577,7 @@ namespace WindowsPowerToggle
                     }
                 }
 
-                MessageBox.Show("Windows Power Toggle v1.0.0.2 installed successfully!\n\nShortcuts have been added, and the app will start automatically on login.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Windows Power Toggle v1.0.0.3 installed successfully!\n\nShortcuts have been added, and the app will start automatically on login.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 System.Diagnostics.Process.Start(targetExe);
             }
@@ -574,7 +613,7 @@ if (-not $csc) {
 }
 
 Set-Content -Path $SourceFile -Value $Code -Encoding UTF8
-Write-Host "Building Windows Power Toggle v1.0.0.2..." -ForegroundColor Cyan
+Write-Host "Building Windows Power Toggle v1.0.0.3..." -ForegroundColor Cyan
 
 & $csc.FullName /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
 Remove-Item $SourceFile -ErrorAction SilentlyContinue
@@ -591,7 +630,7 @@ if (-not $Cert) {
 Set-AuthenticodeSignature -FilePath $OutputExe -Certificate $Cert | Out-Null
 
 if (Test-Path $OutputExe) {
-    Write-Host "Success! Built and signed v1.0.0.2 WindowsPowerToggle.exe" -ForegroundColor Green
+    Write-Host "Success! Built and signed v1.0.0.3 WindowsPowerToggle.exe" -ForegroundColor Green
     Invoke-Item $BuildFolder
 } else {
     Write-Host "Compilation failed." -ForegroundColor Red
