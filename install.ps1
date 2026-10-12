@@ -1,5 +1,5 @@
 # =====================================================================
-# Windows Power Toggle v1.0.0.1 - Self-Building Package
+# Windows Power Toggle v1.0.0.2 - Self-Building Package
 # Publisher: Mikesunboxing Ltd
 # =====================================================================
 
@@ -31,8 +31,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Mikesunboxing Ltd")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.0.1")]
-[assembly: AssemblyFileVersion("1.0.0.1")]
+[assembly: AssemblyVersion("1.0.0.2")]
+[assembly: AssemblyFileVersion("1.0.0.2")]
 
 namespace WindowsPowerToggle
 {
@@ -46,42 +46,29 @@ namespace WindowsPowerToggle
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string targetDir = Path.Combine(appData, "WindowsPowerToggle");
+            string localPrograms = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs");
+            string targetDir = Path.Combine(localPrograms, "WindowsPowerToggle");
             string targetExe = Path.Combine(targetDir, "WindowsPowerToggle.exe");
             string currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
 
-            if (args.Length > 0)
+            // Zero-Argument Logic: If running from target install directory, execute app silently.
+            // If running from anywhere else, prompt user for installation.
+            if (currentExe.Equals(targetExe, StringComparison.OrdinalIgnoreCase))
             {
-                string arg = args[0].ToLowerInvariant();
-                if (arg == "--uninstall")
-                {
-                    Installer.Uninstall();
-                    return;
-                }
-                else if (arg == "--run")
-                {
-                    RunSingleInstanceApp();
-                    return;
-                }
-            }
-
-            if (!currentExe.Equals(targetExe, StringComparison.OrdinalIgnoreCase))
-            {
-                DialogResult result = MessageBox.Show(
-                    "Do you want to install Windows Power Toggle for the active user?\n\nIt will create Start Menu & Desktop shortcuts with a custom icon, run automatically on login, and can be uninstalled anytime via Windows Settings.",
-                    "Windows Power Toggle Setup",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Yes)
-                {
-                    Installer.Install(currentExe, targetDir, targetExe);
-                }
+                RunSingleInstanceApp();
                 return;
             }
 
-            RunSingleInstanceApp();
+            DialogResult result = MessageBox.Show(
+                "Do you want to install Windows Power Toggle for the active user?\n\nIt will create Start Menu & Desktop shortcuts with a custom icon, run automatically on login, and can be uninstalled anytime via Windows Settings.",
+                "Windows Power Toggle Setup",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                Installer.Install(currentExe, targetDir, targetExe);
+            }
         }
 
         private static void RunSingleInstanceApp()
@@ -522,71 +509,42 @@ namespace WindowsPowerToggle
                     IconGenerator.SaveIconToFile(icon, iconPath);
                 }
 
-                using (RegistryKey runKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
-                {
-                    if (runKey != null)
-                    {
-                        runKey.SetValue("WindowsPowerToggle", "\"" + targetExe + "\" --run");
-                    }
-                }
+                // Autostart via Start Menu Startup folder (No registry run switches)
+                string startupFolderPath = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+                string startupShortcutPath = Path.Combine(startupFolderPath, "Windows Power Toggle.lnk");
+                CreateShortcut(startupShortcutPath, targetExe, "", "Windows Power Toggle AutoStart", iconPath);
 
+                // Desktop & Start Menu Shortcuts
                 string startMenuPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
-                CreateShortcut(startMenuPath, targetExe, "--run", "Windows Power Toggle", iconPath);
+                CreateShortcut(startMenuPath, targetExe, "", "Windows Power Toggle", iconPath);
 
                 string desktopPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
-                CreateShortcut(desktopPath, targetExe, "--run", "Windows Power Toggle", iconPath);
+                CreateShortcut(desktopPath, targetExe, "", "Windows Power Toggle", iconPath);
 
+                // Register Uninstall Info
                 string uninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsPowerToggle";
                 using (RegistryKey uninstKey = Registry.CurrentUser.CreateSubKey(uninstallKeyPath))
                 {
                     if (uninstKey != null)
                     {
                         uninstKey.SetValue("DisplayName", "Windows Power Toggle");
-                        uninstKey.SetValue("ApplicationVersion", "1.0.0.1");
+                        uninstKey.SetValue("ApplicationVersion", "1.0.0.2");
                         uninstKey.SetValue("Publisher", "Mikesunboxing Ltd");
                         uninstKey.SetValue("DisplayIcon", iconPath);
-                        uninstKey.SetValue("UninstallString", "\"" + targetExe + "\" --uninstall");
+                        uninstKey.SetValue("UninstallString", "powershell -Command \"Remove-Item -Recurse -Force '" + targetDir + "'; Remove-Item -Force '" + startupShortcutPath + "'\"");
                         uninstKey.SetValue("InstallLocation", targetDir);
                         uninstKey.SetValue("NoModify", 1);
                         uninstKey.SetValue("NoRepair", 1);
                     }
                 }
 
-                MessageBox.Show("Windows Power Toggle installed successfully!\n\nShortcuts with custom icons have been added to your Desktop and Start Menu.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Windows Power Toggle v1.0.0.2 installed successfully!\n\nShortcuts have been added, and the app will start automatically on login.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                System.Diagnostics.Process.Start(targetExe, "--run");
+                System.Diagnostics.Process.Start(targetExe);
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Installation failed: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        public static void Uninstall()
-        {
-            try
-            {
-                using (RegistryKey runKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
-                {
-                    if (runKey != null)
-                    {
-                        runKey.DeleteValue("WindowsPowerToggle", false);
-                    }
-                }
-
-                string startMenuPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
-                if (File.Exists(startMenuPath)) File.Delete(startMenuPath);
-
-                string desktopPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
-                if (File.Exists(desktopPath)) File.Delete(desktopPath);
-
-                Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsPowerToggle", false);
-
-                MessageBox.Show("Windows Power Toggle has been uninstalled, and all shortcuts were removed.", "Uninstalled", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Uninstallation notice: " + ex.Message, "Notice", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -609,57 +567,31 @@ namespace WindowsPowerToggle
 }
 "@
 
-# Locate C# Compiler (csc.exe) on the machine
+# Locate C# Compiler
 $csc = Get-ChildItem -Path "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe" -ErrorAction SilentlyContinue
 if (-not $csc) {
     $csc = Get-ChildItem -Path "$env:SystemRoot\Microsoft.NET\Framework\v4.0.30319\csc.exe" -ErrorAction SilentlyContinue
 }
 
-if (-not $csc) {
-    Write-Host "Error: Could not locate built-in .NET C# compiler." -ForegroundColor Red
-    return
-}
-
-# Write C# Source file
 Set-Content -Path $SourceFile -Value $Code -Encoding UTF8
+Write-Host "Building Windows Power Toggle v1.0.0.2..." -ForegroundColor Cyan
 
-Write-Host "Building Windows Power Toggle v1.0.0.1..." -ForegroundColor Cyan
-
-# Compile executable directly into desktop setup folder
 & $csc.FullName /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
-
 Remove-Item $SourceFile -ErrorAction SilentlyContinue
 
-# Automatically create or retrieve local code-signing cert and sign EXE
-Write-Host "Signing executable with local certificate to prevent heuristic blocks..." -ForegroundColor Cyan
+# Self-Sign Executable
 $Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -like "*Mikesunboxing Ltd*" } | Select-Object -First 1
 if (-not $Cert) {
     $Cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Mikesunboxing Ltd Code Signing" -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(10)
-    
     $CertPath = Join-Path $env:TEMP "MikesunboxingCert.cer"
     Export-Certificate -Cert $Cert -FilePath $CertPath | Out-Null
     Import-Certificate -FilePath $CertPath -CertStoreLocation "Cert:\CurrentUser\Root" | Out-Null
     Remove-Item $CertPath -ErrorAction SilentlyContinue
 }
-
 Set-AuthenticodeSignature -FilePath $OutputExe -Certificate $Cert | Out-Null
 
-# Attempt Machine-Wide Defender Exclusion (Requires Admin)
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if ($isAdmin) {
-    $RegPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths"
-    if (-not (Test-Path $RegPath)) {
-        New-Item -Path $RegPath -Force | Out-Null
-    }
-    New-ItemProperty -Path $RegPath -Name "C:\Users\*\AppData\Local\WindowsPowerToggle" -Value 0 -PropertyType DWORD -Force | Out-Null
-    Write-Host "Added global Windows Defender exclusion." -ForegroundColor Green
-} else {
-    Write-Host "Skipped Defender registry exclusion (Requires Admin privileges)." -ForegroundColor Yellow
-}
-
 if (Test-Path $OutputExe) {
-    Write-Host "Success! Built and signed v1.0.0.1 WindowsPowerToggle.exe" -ForegroundColor Green
-    Write-Host "Folder opened on your Desktop. Double-click 'WindowsPowerToggle.exe' to run setup." -ForegroundColor Yellow
+    Write-Host "Success! Built and signed v1.0.0.2 WindowsPowerToggle.exe" -ForegroundColor Green
     Invoke-Item $BuildFolder
 } else {
     Write-Host "Compilation failed." -ForegroundColor Red
