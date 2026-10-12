@@ -8,17 +8,18 @@ Created by **Mikesunboxing Ltd**.
 
 ## Features
 
-* ⚡ **One-Click Power Cycling:** Left-click the tray icon to cycle through available Windows Power Profiles instantly.
-* ⌨️️ **Global Hotkey Support:** Press `Ctrl` + `Alt` + `P` anywhere in Windows to toggle power modes instantly with balloon notifications.
-* 🎨 **Dynamic High-Contrast Tray Icons:** Visual status indicators featuring bold rounded outlines and glowing inner cores that automatically adjust based on your active power mode:
-  * 🟢 **Electric Green (`#00FF80`):** Power Saver / Eco / Efficient modes
-  * 🔴 **Neon Crimson (`#FF2D55`):** High / Ultimate Performance modes
-  * 🟡 **Vibrant Gold (`#FFD700`):** Balanced / Standard modes
-* 📁 **Zero-Dependency Build Script:** Simple copy-and-paste installer script built directly using Windows' native C# compiler (`csc.exe`)—no external downloads or Visual Studio required.
-* 🚀 **Auto-Start & User-Level Deployment:** Installs directly to `%LOCALAPPDATA%\WindowsPowerToggle` with user-level startup registry entries and Start Menu / Desktop shortcuts with custom dynamic icons.
-* 🛡️ **Smart Security Handling:** Runs entirely without administrative rights while dynamically registering machine-wide Windows Defender exclusions if run with elevated privileges.
-* 🛠️ **Built-in Control Panel Link:** Quick option in the context menu to open native Windows Power Settings (`powercfg.cpl`).
-* 🧹 **Clean Uninstall Support:** Fully registered in Windows Settings / Control Panel for standard 1-click uninstallation.
+- ⚡ **One-Click Power Cycling:** Left-click the tray icon to cycle through available Windows Power Profiles instantly.
+- ⌨ **Global Hotkey Support:** Press `Ctrl` + `Alt` + `P` anywhere in Windows to toggle power modes instantly with balloon notifications.
+- 🎨 **Dynamic High-Contrast Tray Icons:** Visual status indicators featuring bold rounded outlines and glowing inner cores that automatically adjust based on your active power mode:
+  - 🟢 **Electric Green (`#00FF80`):** Power Saver / Eco / Efficient modes
+  - 🔴 **Neon Crimson (`#FF2D55`):** High / Ultimate Performance modes
+  - 🟡 **Vibrant Gold (`#FFD700`):** Balanced / Standard modes
+- 👁️ **Auto-Promoted Tray Icon:** Automatically registers with Windows 11 (`IsPromoted = 1`) to ensure the tray icon defaults to **Always Visible** on your taskbar rather than hiding in the overflow menu.
+- 📁 **Zero-Dependency Build Script:** Copy-and-paste installer script built directly using Windows' native C# compiler (`csc.exe`)—no external downloads or Visual Studio required.
+- 🚀 **Clean Non-Admin Deployment:** Installs directly to `%LOCALAPPDATA%\Programs\WindowsPowerToggle` with Start Menu Startup folder shortcuts (`.lnk`) for autostart, eliminating suspicious background command-line flags.
+- 🛡️ **Built-in Security Hardening:** Generates a local code-signing certificate and signs the compiled binary to establish local trust and resist Microsoft Defender heuristic false-positive blocks (`Trojan:Win32/Commando.A!ml`).
+- 🛠️ **Built-in Control Panel Link:** Quick option in the context menu to open native Windows Power Settings (`powercfg.cpl`).
+- 🧹 **Clean Uninstall Support:** Fully registered in Windows Settings / Control Panel for standard 1-click uninstallation.
 
 ---
 
@@ -28,23 +29,10 @@ You don't need to download compiled binaries or use external tools. You can buil
 
 ### Step-by-Step Guide
 
-1. Press `Win + X` and select **PowerShell** (or Windows Terminal).
-2. Copy the full setup script block and paste it directly into your PowerShell window, then press **Enter**.
-3. The script compiles `WindowsPowerToggle.exe` into a setup folder on your Desktop (`Windows Power Toggle Setup`) and opens the folder automatically.
+1. Press `Win + X` and select **PowerShell** (or Windows Terminal). *Administrative privileges are **NOT** required.*
+2. Copy the full contents of `install.ps1` and paste it directly into your PowerShell window, then press **Enter**.
+3. The script compiles `WindowsPowerToggle.exe` into a setup folder on your Desktop (`Windows Power Toggle Setup`), signs the binary with a local cert, and opens the setup folder automatically.
 4. **Double-click `WindowsPowerToggle.exe`** inside the desktop setup folder to launch the interactive setup prompt.
-5. If you want to remove or delete the desktop setup folder, you will need to reboot the PC at least once to free up the files in use.
-
----
-
-### Command-Line Parameters
-
-The compiled binary supports execution flags for silent operation or uninstallation:
-
-| Parameter | Description | Requires Admin? |
-| :--- | :--- | :--- |
-| *(None)* | Launches the interactive setup installer prompt. | **No** |
-| `--run` | Launches the system tray process directly (used by Windows Startup & shortcuts). | **No** |
-| `--uninstall` | Removes startup registry entries, shortcuts, and app files, then unregisters from Windows Settings. | **No** |
 
 ---
 
@@ -62,10 +50,9 @@ The compiled binary supports execution flags for silent operation or uninstallat
 
 If you ever need to remove the application:
 
-* **Option 1:** Go to **Windows Settings > Apps > Installed Apps**, locate **Windows Power Toggle**, and click **Uninstall**.
-* **Option 2:** Run `WindowsPowerToggle.exe --uninstall` via PowerShell or Command Prompt.
+- **Go to Windows Settings > Apps > Installed Apps**, locate **Windows Power Toggle**, and click **Uninstall**.
 
-This will safely remove shortcuts, startup registry entries, and local app data directory files without touching system defaults.
+This will safely remove Start Menu and Desktop shortcuts, the startup folder link, and local application directory files without touching system defaults.
 
 ---
 
@@ -74,7 +61,7 @@ This will safely remove shortcuts, startup registry entries, and local app data 
 This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.
 
 ### Summary of Rights:
-* **Free Use:** You are free to download, run, use, and share this tool completely free of charge for personal or commercial use.
-* **Non-Proprietary / No Re-Sale:** You **cannot** package, modify, or lock this source code into closed-source commercial software for resale or profit. Any derivative works or distributions **must** remain 100% open-source under the same GPLv3 license terms.
+- **Free Use:** You are free to download, run, use, and share this tool completely free of charge for personal or commercial use.
+- **Non-Proprietary / No Re-Sale:** You **cannot** package, modify, or lock this source code into closed-source commercial software for resale or profit. Any derivative works or distributions **must** remain 100% open-source under the same GPLv3 license terms.
 
 See the full [LICENSE](./LICENSE) file for complete terms and legal details.
