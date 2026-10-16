@@ -14,6 +14,7 @@ Created by **Mikesunboxing Ltd**.
   - 🟢 **Electric Green (`#00FF80`):** Power Saver / Eco / Efficient modes
   - 🔴 **Neon Crimson (`#FF2D55`):** High / Ultimate Performance modes
   - 🟡 **Vibrant Gold (`#FFD700`):** Balanced / Standard modes
+- 🌍 **Universal Multi-Language Support:** Maps power profiles using universal Windows system GUIDs instead of localized text strings, ensuring dynamic tray icon colors match accurately across any Windows display language worldwide.
 - 👁️ **Auto-Promoted Tray Icon:** Automatically registers with Windows 11 (`IsPromoted = 1`) to ensure the tray icon defaults to **Always Visible** on your taskbar rather than hiding in the overflow menu.
 - 📁 **Zero-Dependency Build Script:** Copy-and-paste installer script built directly using Windows' native C# compiler (`csc.exe`)—no external downloads or Visual Studio required.
 - 🚀 **Clean Non-Admin Deployment:** Installs directly to `%LOCALAPPDATA%\Programs\WindowsPowerToggle` with Start Menu Startup folder shortcuts (`.lnk`) for autostart, eliminating suspicious background command-line flags.
