@@ -1,5 +1,5 @@
 # =====================================================================
-# Windows Power Toggle v1.0.0.3 - Self-Building Package
+# Windows Power Toggle v1.0.0.4 - Repaired Self-Building Package
 # Publisher: Mikesunboxing Ltd
 # =====================================================================
 
@@ -31,14 +31,14 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Mikesunboxing Ltd")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.0.3")]
-[assembly: AssemblyFileVersion("1.0.0.3")]
+[assembly: AssemblyVersion("1.0.0.4")]
+[assembly: AssemblyFileVersion("1.0.0.4")]
 
 namespace WindowsPowerToggle
 {
     static class Program
     {
-        private const string MUTEX_NAME = "Global\\WindowsPowerToggle_SingleInstance_Mutex_9001";
+        private const string MUTEX_NAME = "Local\\WindowsPowerToggle_SingleInstance_Mutex_9001";
 
         [STAThread]
         static void Main(string[] args)
@@ -49,10 +49,16 @@ namespace WindowsPowerToggle
             string localPrograms = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs");
             string targetDir = Path.Combine(localPrograms, "WindowsPowerToggle");
             string targetExe = Path.Combine(targetDir, "WindowsPowerToggle.exe");
-            string currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+            string currentExe = Path.GetFullPath(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
 
-            // Zero-Argument Logic: Execute app directly if in target folder, otherwise prompt setup
-            if (currentExe.Equals(targetExe, StringComparison.OrdinalIgnoreCase))
+            if (args != null && Array.Exists(args, a => string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase)))
+            {
+                Installer.Uninstall(targetDir, targetExe);
+                return;
+            }
+
+            // Only launch directly when running from the canonical install location.
+            if (string.Equals(currentExe, Path.GetFullPath(targetExe), StringComparison.OrdinalIgnoreCase))
             {
                 RunSingleInstanceApp();
                 return;
@@ -124,10 +130,20 @@ namespace WindowsPowerToggle
 
         public PowerToggleAppContext()
         {
-            InitializeTray();
-            RegisterHotkey();
-            RefreshPowerSchemes();
-            PromoteTrayIconInRegistry();
+            try
+            {
+                InitializeTray();
+                RegisterHotkey();
+                RefreshPowerSchemes();
+                PromoteTrayIconInRegistry();
+            }
+            catch
+            {
+                if (globalHotkey != null) globalHotkey.Dispose();
+                if (trayIcon != null) { trayIcon.Visible = false; trayIcon.Dispose(); }
+                if (contextMenu != null) contextMenu.Dispose();
+                throw;
+            }
         }
 
         private void InitializeTray()
@@ -151,61 +167,80 @@ namespace WindowsPowerToggle
         {
             try
             {
-                string currentExePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
-                using (RegistryKey notifyKey = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings"))
+                string currentExePath = Path.GetFullPath(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                const string notifyPath = @"Control Panel\NotifyIconSettings";
+                using (RegistryKey notifyKey = Registry.CurrentUser.OpenSubKey(notifyPath))
                 {
                     if (notifyKey == null) return;
-
                     foreach (string subkeyName in notifyKey.GetSubKeyNames())
                     {
-                        using (RegistryKey appKey = Registry.CurrentUser.OpenSubKey(@"Control Panel\NotifyIconSettings\" + subkeyName, true))
+                        using (RegistryKey appKey = Registry.CurrentUser.OpenSubKey(notifyPath + "\\" + subkeyName, true))
                         {
-                            if (appKey != null)
-                            {
-                                object execPathObj = appKey.GetValue("ExecutablePath");
-                                if (execPathObj != null)
-                                {
-                                    string execPath = execPathObj.ToString();
-                                    if (execPath.Equals(currentExePath, StringComparison.OrdinalIgnoreCase) ||
-                                        execPath.IndexOf("WindowsPowerToggle.exe", StringComparison.OrdinalIgnoreCase) >= 0)
-                                    {
-                                        appKey.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
-                                    }
-                                }
-                            }
+                            if (appKey == null) continue;
+                            object value = appKey.GetValue("ExecutablePath");
+                            if (value == null) continue;
+                            string candidate;
+                            try { candidate = Path.GetFullPath(value.ToString()); }
+                            catch { continue; }
+                            if (string.Equals(candidate, currentExePath, StringComparison.OrdinalIgnoreCase))
+                                appKey.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
                         }
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Non-critical operation: ignore registry access exceptions if key doesn't exist yet
+                // Best-effort only: Windows controls notification-area visibility.
+                System.Diagnostics.Debug.WriteLine("Tray promotion skipped: " + ex.Message);
             }
         }
 
         private void RegisterHotkey()
         {
             globalHotkey = new GlobalHotkey();
-            globalHotkey.Register(MOD_CONTROL | MOD_ALT, Keys.P, HOTKEY_ID);
             globalHotkey.KeyPressed += (s, e) => CyclePowerScheme(true);
+            if (!globalHotkey.Register(MOD_CONTROL | MOD_ALT, Keys.P, HOTKEY_ID))
+            {
+                int error = Marshal.GetLastWin32Error();
+                globalHotkey.Dispose();
+                globalHotkey = null;
+                MessageBox.Show(
+                    "The global hotkey Ctrl+Alt+P could not be registered. Another application may already be using it.\n\nWindows error: " + error,
+                    "Windows Power Toggle - Hotkey Unavailable",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private void RefreshPowerSchemes()
         {
-            schemes = PowerManager.GetPowerSchemes();
-            Guid activeGuid = PowerManager.GetActiveScheme();
-
-            currentSchemeIndex = -1;
-            for (int i = 0; i < schemes.Count; i++)
+            try
             {
-                if (schemes[i].Guid == activeGuid)
+                schemes = PowerManager.GetPowerSchemes();
+                Guid activeGuid = PowerManager.GetActiveScheme();
+                currentSchemeIndex = -1;
+                for (int i = 0; i < schemes.Count; i++)
                 {
-                    currentSchemeIndex = i;
-                    break;
+                    if (schemes[i].Guid == activeGuid)
+                    {
+                        currentSchemeIndex = i;
+                        break;
+                    }
                 }
+                UpdateTrayUI();
             }
-
-            UpdateTrayUI();
+            catch (Exception ex)
+            {
+                schemes = new List<PowerScheme>();
+                currentSchemeIndex = -1;
+                UpdateTrayUI();
+                System.Diagnostics.Debug.WriteLine("Unable to refresh power schemes: " + ex);
+                MessageBox.Show(
+                    "Unable to read Windows power profiles. Retry using Refresh Schemes.\n\n" + ex.Message,
+                    "Windows Power Toggle",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private void UpdateTrayUI()
@@ -215,6 +250,11 @@ namespace WindowsPowerToggle
             if (schemes.Count == 0)
             {
                 trayIcon.Text = "Windows Power Toggle (No schemes)";
+                contextMenu.Items.Add(new ToolStripMenuItem("No power profiles found") { Enabled = false });
+                contextMenu.Items.Add(new ToolStripSeparator());
+                contextMenu.Items.Add(new ToolStripMenuItem("Windows Power Settings", null, (s, e) => OpenPowerSettings()));
+                contextMenu.Items.Add(new ToolStripMenuItem("Refresh Schemes", null, (s, e) => RefreshPowerSchemes()));
+                contextMenu.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) => ExitThread()));
                 return;
             }
 
@@ -223,7 +263,9 @@ namespace WindowsPowerToggle
                 : null;
 
             string activeName = activeScheme != null ? activeScheme.Name : "Unknown";
-            trayIcon.Text = string.Format("Power Mode: {0}", activeName);
+            string tooltip = string.Format("Power Mode: {0}", activeName);
+            // NotifyIcon.Text is limited to 63 characters on supported Windows versions.
+            trayIcon.Text = tooltip.Length > 63 ? tooltip.Substring(0, 63) : tooltip;
 
             Color iconColor = GetColorForScheme(activeName);
             if (trayIcon.Icon != null)
@@ -251,17 +293,7 @@ namespace WindowsPowerToggle
 
             contextMenu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem openSettings = new ToolStripMenuItem("Windows Power Settings", null, (s, e) =>
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start("control.exe", "powercfg.cpl");
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Unable to open Control Panel: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            });
+            ToolStripMenuItem openSettings = new ToolStripMenuItem("Windows Power Settings", null, (s, e) => OpenPowerSettings());
             contextMenu.Items.Add(openSettings);
 
             ToolStripMenuItem refreshItem = new ToolStripMenuItem("Refresh Schemes", null, (s, e) => RefreshPowerSchemes());
@@ -269,6 +301,18 @@ namespace WindowsPowerToggle
 
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit", null, (s, e) => ExitThread());
             contextMenu.Items.Add(exitItem);
+        }
+
+        private void OpenPowerSettings()
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("control.exe", "powercfg.cpl") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to open Power Settings: " + ex.Message, "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private Color GetColorForScheme(string schemeName)
@@ -299,18 +343,24 @@ namespace WindowsPowerToggle
 
         private void SwitchToScheme(int index, bool showNotification)
         {
-            if (index < 0 || index >= schemes.Count) return;
+            if (schemes == null || index < 0 || index >= schemes.Count) return;
 
-            currentSchemeIndex = index;
             PowerScheme scheme = schemes[index];
-            PowerManager.SetActiveScheme(scheme.Guid);
-
-            UpdateTrayUI();
-
-            if (showNotification)
+            uint result = PowerManager.SetActiveScheme(scheme.Guid);
+            if (result != 0)
             {
-                trayIcon.ShowBalloonTip(2000, "Windows Power Toggle", string.Format("Power mode set to: {0}", scheme.Name), ToolTipIcon.Info);
+                RefreshPowerSchemes();
+                MessageBox.Show(
+                    "Windows could not switch to the selected power profile. Native error: " + result,
+                    "Windows Power Toggle",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
             }
+
+            RefreshPowerSchemes();
+            if (showNotification)
+                trayIcon.ShowBalloonTip(2000, "Windows Power Toggle", string.Format("Power mode set to: {0}", scheme.Name), ToolTipIcon.Info);
         }
 
         private void TrayIcon_MouseClick(object sender, MouseEventArgs e)
@@ -337,6 +387,9 @@ namespace WindowsPowerToggle
 
     public static class IconGenerator
     {
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool DestroyIcon(IntPtr hIcon);
+
         public static Icon CreateLightningIcon(Color fillBrush)
         {
             using (Bitmap bmp = new Bitmap(32, 32))
@@ -382,8 +435,15 @@ namespace WindowsPowerToggle
                 }
 
                 IntPtr hIcon = bmp.GetHicon();
-                Icon icon = Icon.FromHandle(hIcon);
-                return (Icon)icon.Clone();
+                try
+                {
+                    Icon icon = Icon.FromHandle(hIcon);
+                    return (Icon)icon.Clone();
+                }
+                finally
+                {
+                    if (hIcon != IntPtr.Zero) DestroyIcon(hIcon);
+                }
             }
         }
 
@@ -417,10 +477,10 @@ namespace WindowsPowerToggle
             byte[] Buffer,
             ref uint BufferSize);
 
-        [DllImport("powrprof.dll")]
+        [DllImport("powrprof.dll", SetLastError = true)]
         private static extern uint PowerGetActiveScheme(IntPtr UserPowerKey, out IntPtr ActivePolicyGuid);
 
-        [DllImport("powrprof.dll")]
+        [DllImport("powrprof.dll", SetLastError = true)]
         private static extern uint PowerSetActiveScheme(IntPtr UserPowerKey, ref Guid SchemeGuid);
 
         private const uint ACCESS_SCHEME = 16;
@@ -429,44 +489,51 @@ namespace WindowsPowerToggle
         {
             List<PowerScheme> list = new List<PowerScheme>();
             uint index = 0;
-
             while (true)
             {
                 uint guidSize = 16;
                 byte[] guidBuffer = new byte[16];
-
                 uint result = PowerEnumerate(IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, ACCESS_SCHEME, index, guidBuffer, ref guidSize);
-                if (result != 0) break;
+                if (result == 259) break; // ERROR_NO_MORE_ITEMS
+                if (result != 0)
+                    throw new InvalidOperationException("PowerEnumerate failed with Windows error " + result + ".");
+                if (guidSize < 16)
+                    throw new InvalidOperationException("PowerEnumerate returned an invalid GUID buffer size.");
 
                 Guid schemeGuid = new Guid(guidBuffer);
                 string name = GetSchemeFriendlyName(schemeGuid);
-
-                if (!string.IsNullOrEmpty(name))
-                {
-                    list.Add(new PowerScheme(schemeGuid, name));
-                }
-
+                if (string.IsNullOrEmpty(name))
+                    name = "Power Scheme (" + schemeGuid.ToString().Substring(0, 8) + ")";
+                list.Add(new PowerScheme(schemeGuid, name));
                 index++;
             }
-
             return list;
         }
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LocalFree(IntPtr hMem);
+
         public static Guid GetActiveScheme()
         {
-            IntPtr guidPtr;
-            if (PowerGetActiveScheme(IntPtr.Zero, out guidPtr) == 0)
+            IntPtr guidPtr = IntPtr.Zero;
+            uint result = PowerGetActiveScheme(IntPtr.Zero, out guidPtr);
+            if (result != 0)
+                throw new InvalidOperationException("PowerGetActiveScheme failed with Windows error " + result + ".");
+            if (guidPtr == IntPtr.Zero)
+                throw new InvalidOperationException("PowerGetActiveScheme returned a null pointer.");
+            try
             {
-                Guid active = (Guid)Marshal.PtrToStructure(guidPtr, typeof(Guid));
-                Marshal.FreeHGlobal(guidPtr);
-                return active;
+                return (Guid)Marshal.PtrToStructure(guidPtr, typeof(Guid));
             }
-            return Guid.Empty;
+            finally
+            {
+                LocalFree(guidPtr);
+            }
         }
 
-        public static void SetActiveScheme(Guid schemeGuid)
+        public static uint SetActiveScheme(Guid schemeGuid)
         {
-            PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);
+            return PowerSetActiveScheme(IntPtr.Zero, ref schemeGuid);
         }
 
         private static string GetSchemeFriendlyName(Guid schemeGuid)
@@ -485,14 +552,16 @@ namespace WindowsPowerToggle
 
     public class GlobalHotkey : NativeWindow, IDisposable
     {
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         private const int WM_HOTKEY = 0x0312;
         private int currentId;
+        private bool registered;
+        private bool disposed;
 
         public event EventHandler KeyPressed;
 
@@ -503,8 +572,10 @@ namespace WindowsPowerToggle
 
         public bool Register(uint modifiers, Keys key, int id)
         {
+            if (disposed) throw new ObjectDisposedException("GlobalHotkey");
             currentId = id;
-            return RegisterHotKey(this.Handle, id, modifiers, (uint)key);
+            registered = RegisterHotKey(this.Handle, id, modifiers, (uint)key);
+            return registered;
         }
 
         protected override void WndProc(ref Message m)
@@ -520,8 +591,14 @@ namespace WindowsPowerToggle
 
         public void Dispose()
         {
-            UnregisterHotKey(this.Handle, currentId);
-            this.DestroyHandle();
+            if (disposed) return;
+            disposed = true;
+            if (registered && this.Handle != IntPtr.Zero)
+            {
+                UnregisterHotKey(this.Handle, currentId);
+                registered = false;
+            }
+            if (this.Handle != IntPtr.Zero) this.DestroyHandle();
         }
     }
 
@@ -534,13 +611,17 @@ namespace WindowsPowerToggle
                 foreach (var proc in System.Diagnostics.Process.GetProcessesByName("WindowsPowerToggle"))
                 {
                     if (proc.Id != System.Diagnostics.Process.GetCurrentProcess().Id)
-                    {
-                        proc.Kill();
-                    }
+                        throw new InvalidOperationException("Windows Power Toggle is already running. Exit it from the tray menu, then run setup again.");
                 }
 
                 Directory.CreateDirectory(targetDir);
-                File.Copy(currentExe, targetExe, true);
+                string stagedExe = targetExe + ".new";
+                if (File.Exists(stagedExe)) File.Delete(stagedExe);
+                File.Copy(currentExe, stagedExe, true);
+                if (File.Exists(targetExe))
+                    File.Replace(stagedExe, targetExe, null);
+                else
+                    File.Move(stagedExe, targetExe);
 
                 string iconPath = Path.Combine(targetDir, "app.ico");
                 using (Icon icon = IconGenerator.CreateLightningIcon(Color.FromArgb(255, 215, 0)))
@@ -567,17 +648,17 @@ namespace WindowsPowerToggle
                     if (uninstKey != null)
                     {
                         uninstKey.SetValue("DisplayName", "Windows Power Toggle");
-                        uninstKey.SetValue("ApplicationVersion", "1.0.0.3");
+                        uninstKey.SetValue("ApplicationVersion", "1.0.0.4");
                         uninstKey.SetValue("Publisher", "Mikesunboxing Ltd");
                         uninstKey.SetValue("DisplayIcon", iconPath);
-                        uninstKey.SetValue("UninstallString", "powershell -Command \"Remove-Item -Recurse -Force '" + targetDir + "'; Remove-Item -Force '" + startupShortcutPath + "'\"");
+                        uninstKey.SetValue("UninstallString", "\"" + targetExe + "\" --uninstall");
                         uninstKey.SetValue("InstallLocation", targetDir);
                         uninstKey.SetValue("NoModify", 1);
                         uninstKey.SetValue("NoRepair", 1);
                     }
                 }
 
-                MessageBox.Show("Windows Power Toggle v1.0.0.3 installed successfully!\n\nShortcuts have been added, and the app will start automatically on login.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Windows Power Toggle v1.0.0.4 installed successfully!\n\nShortcuts have been added, and the app will start automatically on login.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 System.Diagnostics.Process.Start(targetExe);
             }
@@ -585,6 +666,44 @@ namespace WindowsPowerToggle
             {
                 MessageBox.Show("Installation failed: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        public static void Uninstall(string targetDir, string targetExe)
+        {
+            try
+            {
+                string startupShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Windows Power Toggle.lnk");
+                string startMenuShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
+                string desktopShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
+                int currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                string script =
+                    "$targetPid = " + currentPid + "; " +
+                    "while (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 }; " +
+                    "$paths = @('" + EscapePowerShellPath(startupShortcutPath) + "','" +
+                    EscapePowerShellPath(startMenuShortcutPath) + "','" +
+                    EscapePowerShellPath(desktopShortcutPath) + "'); " +
+                    "foreach ($p in $paths) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }; " +
+                    "Remove-Item -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WindowsPowerToggle' -Recurse -Force -ErrorAction SilentlyContinue; " +
+                    "Remove-Item -LiteralPath '" + EscapePowerShellPath(targetDir) + "' -Recurse -Force -ErrorAction SilentlyContinue";
+
+                string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "powershell.exe", "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand " + encoded)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unable to start uninstallation: " + ex.Message, "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static string EscapePowerShellPath(string path)
+        {
+            return path.Replace("'", "''");
         }
 
         private static void CreateShortcut(string shortcutPath, string targetPath, string arguments, string description, string iconPath)
@@ -606,32 +725,62 @@ namespace WindowsPowerToggle
 }
 "@
 
-# Locate C# Compiler
-$csc = Get-ChildItem -Path "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe" -ErrorAction SilentlyContinue
-if (-not $csc) {
-    $csc = Get-ChildItem -Path "$env:SystemRoot\Microsoft.NET\Framework\v4.0.30319\csc.exe" -ErrorAction SilentlyContinue
+# Locate the .NET Framework C# compiler.
+$cscCandidates = @(
+    "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+    "$env:SystemRoot\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+)
+$cscPath = $cscCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $cscPath) {
+    throw "C# compiler (csc.exe) was not found. The .NET Framework compiler must be available on this Windows installation."
 }
 
-Set-Content -Path $SourceFile -Value $Code -Encoding UTF8
-Write-Host "Building Windows Power Toggle v1.0.0.3..." -ForegroundColor Cyan
-
-& $csc.FullName /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
-Remove-Item $SourceFile -ErrorAction SilentlyContinue
-
-# Self-Sign Executable
-$Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -like "*Mikesunboxing Ltd*" } | Select-Object -First 1
-if (-not $Cert) {
-    $Cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Mikesunboxing Ltd Code Signing" -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(10)
-    $CertPath = Join-Path $env:TEMP "MikesunboxingCert.cer"
-    Export-Certificate -Cert $Cert -FilePath $CertPath | Out-Null
-    Import-Certificate -FilePath $CertPath -CertStoreLocation "Cert:\CurrentUser\Root" | Out-Null
-    Remove-Item $CertPath -ErrorAction SilentlyContinue
+# Remove stale output so a failed build cannot be mistaken for success.
+Remove-Item -LiteralPath $OutputExe -Force -ErrorAction SilentlyContinue
+Set-Content -LiteralPath $SourceFile -Value $Code -Encoding UTF8
+try {
+    Write-Host "Building Windows Power Toggle v1.0.0.4..." -ForegroundColor Cyan
+    & $cscPath /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
+    $compileExitCode = $LASTEXITCODE
+    if ($compileExitCode -ne 0 -or -not (Test-Path -LiteralPath $OutputExe)) {
+        throw "Compilation failed (csc exit code: $compileExitCode)."
+    }
 }
-Set-AuthenticodeSignature -FilePath $OutputExe -Certificate $Cert | Out-Null
+finally {
+    Remove-Item -LiteralPath $SourceFile -Force -ErrorAction SilentlyContinue
+}
 
-if (Test-Path $OutputExe) {
-    Write-Host "Success! Built and signed v1.0.0.3 WindowsPowerToggle.exe" -ForegroundColor Green
+# Sign only a freshly compiled binary. Self-signing does not guarantee Defender trust.
+try {
+    $Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction Stop |
+        Where-Object { $_.Subject -eq "CN=Mikesunboxing Ltd Code Signing" } |
+        Select-Object -First 1
+    if (-not $Cert) {
+        $Cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject "CN=Mikesunboxing Ltd Code Signing" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -NotAfter (Get-Date).AddYears(3) `
+            -ErrorAction Stop
+    }
+    $signature = Set-AuthenticodeSignature -LiteralPath $OutputExe -Certificate $Cert -ErrorAction Stop
+    if (-not $signature -or $signature.Status -eq "NotSigned") {
+        throw "Authenticode signature was not applied."
+    }
+    if ($signature.Status -ne "Valid") {
+        Write-Warning "Signature verification status is '$($signature.Status)'. The file may be signed but the self-signed certificate is not trusted; this does not establish Defender reputation."
+    } else {
+        Write-Host "Signature status: Valid." -ForegroundColor Green
+    }
+}
+catch {
+    Remove-Item -LiteralPath $OutputExe -Force -ErrorAction SilentlyContinue
+    throw "Signing failed. The output executable was removed. Details: $($_.Exception.Message)"
+}
+
+if (Test-Path -LiteralPath $OutputExe) {
+    Write-Host "Success! Built and signed v1.0.0.4 WindowsPowerToggle.exe" -ForegroundColor Green
     Invoke-Item $BuildFolder
 } else {
-    Write-Host "Compilation failed." -ForegroundColor Red
+    throw "Build failed: output executable was not created."
 }
