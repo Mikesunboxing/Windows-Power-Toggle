@@ -1,5 +1,5 @@
 # =====================================================================
-# Windows Power Toggle v1.0.0.4 - Repaired Self-Building Package
+# Windows Power Toggle v1.0.0.7 - Self-Building Package
 # Publisher: Mikesunboxing Ltd
 # =====================================================================
 
@@ -7,8 +7,11 @@ $DesktopPath = [Environment]::GetFolderPath("Desktop")
 $BuildFolder = Join-Path $DesktopPath "Windows Power Toggle Setup"
 New-Item -ItemType Directory -Force -Path $BuildFolder | Out-Null
 
-$OutputExe = Join-Path $BuildFolder "WindowsPowerToggle.exe"
+$OutputExe = Join-Path $BuildFolder "WindowsPowerToggle_Setup_v1.0.0.7.exe"
+$LegacyOutputExe = Join-Path $BuildFolder "WindowsPowerToggle.exe"
 $SourceFile = Join-Path $env:TEMP "WindowsPowerToggle_Source.cs"
+$ManifestFile = Join-Path $env:TEMP "WindowsPowerToggle_$($PID).manifest"
+$ReleaseThumbprint = $env:WPT_SIGNING_THUMBPRINT
 
 $Code = @"
 using System;
@@ -31,8 +34,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Mikesunboxing Ltd")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.0.4")]
-[assembly: AssemblyFileVersion("1.0.0.4")]
+[assembly: AssemblyVersion("1.0.0.7")]
+[assembly: AssemblyFileVersion("1.0.0.7")]
 
 namespace WindowsPowerToggle
 {
@@ -51,6 +54,15 @@ namespace WindowsPowerToggle
             string targetExe = Path.Combine(targetDir, "WindowsPowerToggle.exe");
             string currentExe = Path.GetFullPath(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
 
+            if (args != null && args.Length == 2 && args[0] == "--cleanup" &&
+                !string.Equals(currentExe, Path.GetFullPath(targetExe), StringComparison.OrdinalIgnoreCase))
+            {
+                int parentPid;
+                if (int.TryParse(args[1], out parentPid))
+                    Installer.Cleanup(parentPid, targetDir, currentExe);
+                return;
+            }
+
             if (args != null && Array.Exists(args, a => string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase)))
             {
                 Installer.Uninstall(targetDir, targetExe);
@@ -65,7 +77,7 @@ namespace WindowsPowerToggle
             }
 
             DialogResult result = MessageBox.Show(
-                "Do you want to install Windows Power Toggle for the active user?\n\nIt will create Start Menu & Desktop shortcuts with a custom icon, run automatically on login, and can be uninstalled anytime via Windows Settings.",
+                "Do you want to install Windows Power Toggle for the active user?\n\nIt will create Start Menu & Desktop shortcuts with a custom icon, start automatically on login, and can be uninstalled anytime via Windows Settings.",
                 "Windows Power Toggle Setup",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
@@ -135,7 +147,6 @@ namespace WindowsPowerToggle
                 InitializeTray();
                 RegisterHotkey();
                 RefreshPowerSchemes();
-                PromoteTrayIconInRegistry();
             }
             catch
             {
@@ -158,41 +169,6 @@ namespace WindowsPowerToggle
             };
 
             trayIcon.MouseClick += TrayIcon_MouseClick;
-        }
-
-        /// <summary>
-        /// Automatically forces Windows 11 to display the tray icon permanently (IsPromoted = 1)
-        /// </summary>
-        private void PromoteTrayIconInRegistry()
-        {
-            try
-            {
-                string currentExePath = Path.GetFullPath(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
-                const string notifyPath = @"Control Panel\NotifyIconSettings";
-                using (RegistryKey notifyKey = Registry.CurrentUser.OpenSubKey(notifyPath))
-                {
-                    if (notifyKey == null) return;
-                    foreach (string subkeyName in notifyKey.GetSubKeyNames())
-                    {
-                        using (RegistryKey appKey = Registry.CurrentUser.OpenSubKey(notifyPath + "\\" + subkeyName, true))
-                        {
-                            if (appKey == null) continue;
-                            object value = appKey.GetValue("ExecutablePath");
-                            if (value == null) continue;
-                            string candidate;
-                            try { candidate = Path.GetFullPath(value.ToString()); }
-                            catch { continue; }
-                            if (string.Equals(candidate, currentExePath, StringComparison.OrdinalIgnoreCase))
-                                appKey.SetValue("IsPromoted", 1, RegistryValueKind.DWord);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Best-effort only: Windows controls notification-area visibility.
-                System.Diagnostics.Debug.WriteLine("Tray promotion skipped: " + ex.Message);
-            }
         }
 
         private void RegisterHotkey()
@@ -264,7 +240,6 @@ namespace WindowsPowerToggle
 
             string activeName = activeScheme != null ? activeScheme.Name : "Unknown";
             string tooltip = string.Format("Power Mode: {0}", activeName);
-            // NotifyIcon.Text is limited to 63 characters on supported Windows versions.
             trayIcon.Text = tooltip.Length > 63 ? tooltip.Substring(0, 63) : tooltip;
 
             Color iconColor = GetColorForScheme(activeName);
@@ -298,6 +273,36 @@ namespace WindowsPowerToggle
 
             ToolStripMenuItem refreshItem = new ToolStripMenuItem("Refresh Schemes", null, (s, e) => RefreshPowerSchemes());
             contextMenu.Items.Add(refreshItem);
+
+            string startupShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Windows Power Toggle.lnk");
+            ToolStripMenuItem startupItem = new ToolStripMenuItem("Start with Windows");
+            startupItem.Checked = File.Exists(startupShortcut);
+            startupItem.Click += (s, e) =>
+            {
+                try
+                {
+                    string exe = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                    string marker = Path.Combine(Path.GetDirectoryName(exe), "startup.disabled");
+                    if (File.Exists(startupShortcut))
+                    {
+                        File.Delete(startupShortcut);
+                        File.WriteAllText(marker, "disabled");
+                    }
+                    else
+                    {
+                        Installer.CreateShortcut(startupShortcut, exe, "", "Windows Power Toggle AutoStart",
+                            Path.Combine(Path.GetDirectoryName(exe), "app.ico"));
+                        if (File.Exists(marker)) File.Delete(marker);
+                    }
+                    startupItem.Checked = File.Exists(startupShortcut);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Unable to change startup preference: " + ex.Message,
+                        "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            contextMenu.Items.Add(startupItem);
 
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit", null, (s, e) => ExitThread());
             contextMenu.Items.Add(exitItem);
@@ -381,7 +386,8 @@ namespace WindowsPowerToggle
             {
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
-            } base.ExitThreadCore();
+            } 
+            base.ExitThreadCore();
         }
     }
 
@@ -579,7 +585,8 @@ namespace WindowsPowerToggle
         }
 
         protected override void WndProc(ref Message m)
-        { base.WndProc(ref m);
+        { 
+            base.WndProc(ref m);
             if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == currentId)
             {
                 if (KeyPressed != null)
@@ -604,10 +611,30 @@ namespace WindowsPowerToggle
 
     public static class Installer
     {
-        public static void Install(string currentExe, string targetDir, string targetExe)
+        private static void CleanupOldHelpers()
         {
             try
             {
+                foreach (string file in Directory.GetFiles(Path.GetTempPath(), "WindowsPowerToggle_Uninstall_*.exe"))
+                {
+                    // Ignore locked helpers; a running helper cannot be deleted.
+                    try { File.Delete(file); }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        public static void Install(string currentExe, string targetDir, string targetExe)
+        {
+            string backupExe = targetExe + ".backup";
+            bool installedExe = false;
+            bool existingExe = File.Exists(targetExe);
+            try
+            {
+                CleanupOldHelpers();
                 foreach (var proc in System.Diagnostics.Process.GetProcessesByName("WindowsPowerToggle"))
                 {
                     if (proc.Id != System.Diagnostics.Process.GetCurrentProcess().Id)
@@ -618,10 +645,14 @@ namespace WindowsPowerToggle
                 string stagedExe = targetExe + ".new";
                 if (File.Exists(stagedExe)) File.Delete(stagedExe);
                 File.Copy(currentExe, stagedExe, true);
-                if (File.Exists(targetExe))
-                    File.Replace(stagedExe, targetExe, null);
+                if (existingExe)
+                {
+                    if (File.Exists(backupExe)) File.Delete(backupExe);
+                    File.Replace(stagedExe, targetExe, backupExe);
+                }
                 else
                     File.Move(stagedExe, targetExe);
+                installedExe = true;
 
                 string iconPath = Path.Combine(targetDir, "app.ico");
                 using (Icon icon = IconGenerator.CreateLightningIcon(Color.FromArgb(255, 215, 0)))
@@ -632,7 +663,9 @@ namespace WindowsPowerToggle
                 // Autostart via Start Menu Startup folder (No registry run switches)
                 string startupFolderPath = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
                 string startupShortcutPath = Path.Combine(startupFolderPath, "Windows Power Toggle.lnk");
-                CreateShortcut(startupShortcutPath, targetExe, "", "Windows Power Toggle AutoStart", iconPath);
+                // Enable startup by default for new installs; preserve existing users' choice.
+                if (!File.Exists(Path.Combine(targetDir, "startup.disabled")))
+                    CreateShortcut(startupShortcutPath, targetExe, "", "Windows Power Toggle AutoStart", iconPath);
 
                 // Desktop & Start Menu Shortcuts
                 string startMenuPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
@@ -648,7 +681,7 @@ namespace WindowsPowerToggle
                     if (uninstKey != null)
                     {
                         uninstKey.SetValue("DisplayName", "Windows Power Toggle");
-                        uninstKey.SetValue("ApplicationVersion", "1.0.0.4");
+                        uninstKey.SetValue("DisplayVersion", "1.0.0.7");
                         uninstKey.SetValue("Publisher", "Mikesunboxing Ltd");
                         uninstKey.SetValue("DisplayIcon", iconPath);
                         uninstKey.SetValue("UninstallString", "\"" + targetExe + "\" --uninstall");
@@ -658,12 +691,33 @@ namespace WindowsPowerToggle
                     }
                 }
 
-                MessageBox.Show("Windows Power Toggle v1.0.0.4 installed successfully!\n\nShortcuts have been added, and the app will start automatically on login.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Windows Power Toggle v1.0.0.7 installed successfully!\n\nShortcuts have been added. Startup is enabled for new installs and can be changed from the tray menu.", "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 System.Diagnostics.Process.Start(targetExe);
+                if (File.Exists(backupExe))
+                {
+                    try { File.Delete(backupExe); }
+                    catch (IOException) { } // A backup cleanup failure must not undo a working installation.
+                }
             }
             catch (Exception ex)
             {
+                // Restore the previous binary if a later installation step fails.
+                if (installedExe)
+                {
+                    try
+                    {
+                        if (existingExe && File.Exists(backupExe))
+                            File.Replace(backupExe, targetExe, null);
+                        else if (!existingExe && File.Exists(targetExe))
+                            File.Delete(targetExe);
+                    }
+                    catch (Exception restoreEx)
+                    {
+                        MessageBox.Show("Automatic rollback failed: " + restoreEx.Message,
+                            "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
                 MessageBox.Show("Installation failed: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -672,41 +726,95 @@ namespace WindowsPowerToggle
         {
             try
             {
-                string startupShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Windows Power Toggle.lnk");
-                string startMenuShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
-                string desktopShortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
-                int currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
-                string script =
-                    "$targetPid = " + currentPid + "; " +
-                    "while (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 }; " +
-                    "$paths = @('" + EscapePowerShellPath(startupShortcutPath) + "','" +
-                    EscapePowerShellPath(startMenuShortcutPath) + "','" +
-                    EscapePowerShellPath(desktopShortcutPath) + "'); " +
-                    "foreach ($p in $paths) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }; " +
-                    "Remove-Item -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WindowsPowerToggle' -Recurse -Force -ErrorAction SilentlyContinue; " +
-                    "Remove-Item -LiteralPath '" + EscapePowerShellPath(targetDir) + "' -Recurse -Force -ErrorAction SilentlyContinue";
+                CleanupOldHelpers();
+                if (!File.Exists(targetExe))
+                    throw new FileNotFoundException("Installed application not found.", targetExe);
 
-                string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                    "powershell.exe", "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand " + encoded)
+                foreach (var proc in System.Diagnostics.Process.GetProcessesByName("WindowsPowerToggle"))
                 {
-                    UseShellExecute = false,
-                    CreateNoWindow = true
+                    try
+                    {
+                        if (proc.Id != System.Diagnostics.Process.GetCurrentProcess().Id &&
+                            string.Equals(proc.MainModule.FileName, targetExe,
+                                StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException(
+                                "Please exit Windows Power Toggle from the tray before uninstalling.");
+                    }
+                    finally { proc.Dispose(); }
+                }
+
+                // Run a temporary copy so the installed executable can be deleted after exit.
+                string helper = Path.Combine(Path.GetTempPath(), "WindowsPowerToggle_Uninstall_" +
+                    Guid.NewGuid().ToString("N") + ".exe");
+                File.Copy(targetExe, helper);
+                int pid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(helper,
+                    "--cleanup " + pid)
+                {
+                    UseShellExecute = false
                 });
                 Application.Exit();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Unable to start uninstallation: " + ex.Message, "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Unable to start uninstallation: " + ex.Message,
+                    "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private static string EscapePowerShellPath(string path)
+        public static void Cleanup(int parentPid, string targetDir, string helperExe)
         {
-            return path.Replace("'", "''");
+            try
+            {
+                try
+                {
+                    using (var parent = System.Diagnostics.Process.GetProcessById(parentPid))
+                        if (!parent.WaitForExit(15000))
+                            throw new InvalidOperationException("The uninstaller did not exit within 15 seconds.");
+                }
+                catch (ArgumentException) { }
+
+                if (!string.Equals(Path.GetFullPath(targetDir),
+                    Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "Programs", "WindowsPowerToggle")), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Invalid installation directory.");
+
+                // Do not remove an installation while another instance is running.
+                foreach (var proc in System.Diagnostics.Process.GetProcessesByName("WindowsPowerToggle"))
+                {
+                    try
+                    {
+                        if (proc.Id != System.Diagnostics.Process.GetCurrentProcess().Id &&
+                            string.Equals(proc.MainModule.FileName,
+                                Path.Combine(targetDir, "WindowsPowerToggle.exe"),
+                                StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException("Exit Windows Power Toggle from the tray before uninstalling.");
+                    }
+                    finally { proc.Dispose(); }
+                }
+
+                string startup = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Windows Power Toggle.lnk");
+                string menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Windows Power Toggle.lnk");
+                string desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Windows Power Toggle.lnk");
+                foreach (string shortcut in new string[] { startup, menu, desktop })
+                    if (File.Exists(shortcut)) File.Delete(shortcut);
+
+                Registry.CurrentUser.DeleteSubKeyTree(
+                    @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsPowerToggle", false);
+                if (Directory.Exists(targetDir)) Directory.Delete(targetDir, true);
+                // The temporary helper cannot delete itself while running; clean up
+                // older helpers on the next installation/uninstallation.
+                MessageBox.Show("Windows Power Toggle was uninstalled successfully.",
+                    "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Uninstallation could not complete: " + ex.Message,
+                    "Windows Power Toggle", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
-        private static void CreateShortcut(string shortcutPath, string targetPath, string arguments, string description, string iconPath)
+        public static void CreateShortcut(string shortcutPath, string targetPath, string arguments, string description, string iconPath)
         {
             Type shellType = Type.GetTypeFromProgID("WScript.Shell");
             object shell = Activator.CreateInstance(shellType);
@@ -736,50 +844,51 @@ if (-not $cscPath) {
 }
 
 # Remove stale output so a failed build cannot be mistaken for success.
-Remove-Item -LiteralPath $OutputExe -Force -ErrorAction SilentlyContinue
+# The distributable is named Setup; the installed executable remains WindowsPowerToggle.exe.
+# Remove both the previous output and the legacy filename to prevent confusion.
+Remove-Item -LiteralPath $OutputExe, $LegacyOutputExe -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $SourceFile -Value $Code -Encoding UTF8
 try {
-    Write-Host "Building Windows Power Toggle v1.0.0.4..." -ForegroundColor Cyan
-    & $cscPath /target:winexe /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
+    Write-Host "Building Windows Power Toggle v1.0.0.7..." -ForegroundColor Cyan
+    @'
+<?xml version="1.0" encoding="utf-8"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>
+'@ | Set-Content -LiteralPath $ManifestFile -Encoding UTF8
+    & $cscPath /target:winexe /win32manifest:"$ManifestFile" /out:"$OutputExe" /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll "$SourceFile"
     $compileExitCode = $LASTEXITCODE
     if ($compileExitCode -ne 0 -or -not (Test-Path -LiteralPath $OutputExe)) {
         throw "Compilation failed (csc exit code: $compileExitCode)."
     }
 }
 finally {
-    Remove-Item -LiteralPath $SourceFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $SourceFile, $ManifestFile -Force -ErrorAction SilentlyContinue
 }
 
-# Sign only a freshly compiled binary. Self-signing does not guarantee Defender trust.
-try {
-    $Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction Stop |
-        Where-Object { $_.Subject -eq "CN=Mikesunboxing Ltd Code Signing" } |
-        Select-Object -First 1
-    if (-not $Cert) {
-        $Cert = New-SelfSignedCertificate `
-            -Type CodeSigningCert `
-            -Subject "CN=Mikesunboxing Ltd Code Signing" `
-            -CertStoreLocation "Cert:\CurrentUser\My" `
-            -NotAfter (Get-Date).AddYears(3) `
-            -ErrorAction Stop
-    }
+# Development builds remain unsigned. For release signing, set WPT_SIGNING_THUMBPRINT
+# to the thumbprint of a trusted code-signing certificate installed in CurrentUser\My.
+if ($ReleaseThumbprint) {
+    $Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
+        Where-Object { $_.Thumbprint -eq $ReleaseThumbprint } | Select-Object -First 1
+    if (-not $Cert) { throw "Release signing certificate not found." }
     $signature = Set-AuthenticodeSignature -LiteralPath $OutputExe -Certificate $Cert -ErrorAction Stop
-    if (-not $signature -or $signature.Status -eq "NotSigned") {
-        throw "Authenticode signature was not applied."
-    }
     if ($signature.Status -ne "Valid") {
-        Write-Warning "Signature verification status is '$($signature.Status)'. The file may be signed but the self-signed certificate is not trusted; this does not establish Defender reputation."
-    } else {
-        Write-Host "Signature status: Valid." -ForegroundColor Green
+        throw "Release signing failed verification: $($signature.Status)"
     }
-}
-catch {
-    Remove-Item -LiteralPath $OutputExe -Force -ErrorAction SilentlyContinue
-    throw "Signing failed. The output executable was removed. Details: $($_.Exception.Message)"
+    Write-Host "Release signature verified." -ForegroundColor Green
+} else {
+    Write-Warning "Unsigned development build. Do not distribute as a trusted signed release."
 }
 
 if (Test-Path -LiteralPath $OutputExe) {
-    Write-Host "Success! Built and signed v1.0.0.4 WindowsPowerToggle.exe" -ForegroundColor Green
+    Write-Host "Success! Built v1.0.0.7: $OutputExe" -ForegroundColor Green
     Invoke-Item $BuildFolder
 } else {
     throw "Build failed: output executable was not created."
